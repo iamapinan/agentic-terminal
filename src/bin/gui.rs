@@ -43,6 +43,7 @@ struct AgenticGuiApp {
     workspace: WorkspaceManager,
     llm_service: Arc<LlmService>,
     model_fetcher: Arc<ModelFetcher>,
+    rt: Arc<tokio::runtime::Runtime>,
 
     // Event Bus
     event_tx: mpsc::Sender<GuiEvent>,
@@ -71,7 +72,7 @@ struct AgenticGuiApp {
 }
 
 impl AgenticGuiApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, rt: Arc<tokio::runtime::Runtime>) -> Self {
         // macOS Native Dark Styling
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = Color32::from_rgb(13, 16, 23);
@@ -94,6 +95,7 @@ impl AgenticGuiApp {
             workspace: WorkspaceManager::new(),
             llm_service,
             model_fetcher,
+            rt,
             event_tx,
             event_rx,
             chat_input: String::new(),
@@ -133,7 +135,7 @@ impl AgenticGuiApp {
         let cfg = self.config.clone();
         let tx = self.event_tx.clone();
 
-        tokio::spawn(async move {
+        self.rt.spawn(async move {
             match fetcher.fetch_models(&cfg, provider).await {
                 Ok(models) => {
                     let _ = tx.send(GuiEvent::ModelsLoaded { provider, models });
@@ -162,7 +164,7 @@ impl AgenticGuiApp {
         let service = self.llm_service.clone();
         let tx = self.event_tx.clone();
 
-        tokio::spawn(async move {
+        self.rt.spawn(async move {
             let sys_prompt = AgentEngine::build_system_prompt(&ws_summary);
             match service.send_prompt(&cfg, &sys_prompt, &history).await {
                 Ok(reply) => {
@@ -176,7 +178,7 @@ impl AgenticGuiApp {
         });
     }
 
-    // Direct streaming execution of commands directly to the terminal!
+    // Direct streaming execution of commands directly to the terminal
     fn run_command_directly(&mut self, cmd: String, is_agent: bool) {
         let trimmed = cmd.trim().to_string();
         if trimmed.is_empty() {
@@ -190,7 +192,7 @@ impl AgenticGuiApp {
         let tx = self.event_tx.clone();
         let current_dir = self.workspace.current_dir.clone();
 
-        tokio::spawn(async move {
+        self.rt.spawn(async move {
             // Handle `cd` internally
             if trimmed.starts_with("cd ") || trimmed == "cd" {
                 let target = trimmed.strip_prefix("cd").unwrap().trim();
@@ -264,6 +266,9 @@ impl AgenticGuiApp {
 
 impl eframe::App for AgenticGuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Request repaint so events process quickly
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+
         // Handle background async events
         while let Ok(ev) = self.event_rx.try_recv() {
             match ev {
@@ -314,7 +319,7 @@ impl eframe::App for AgenticGuiApp {
                         self.workspace.add_log(false, true, is_agent, format!("[ERR] Process exited with code {code}"));
                     }
 
-                    // Feed result back to the Copilot so it knows the terminal output!
+                    // Feed result back to the Copilot so it knows the terminal output
                     if is_agent {
                         let snippet = if full_output.len() > 600 {
                             format!("{}...\n[Output truncated]", &full_output[..600])
@@ -760,17 +765,26 @@ impl eframe::App for AgenticGuiApp {
 }
 
 fn main() -> eframe::Result<()> {
+    let rt = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to initialize Tokio runtime"),
+    );
+
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([880.0, 540.0])
-            .with_title("Agentic Terminal Desktop"),
+            .with_title("Agentic Terminal Desktop")
+            .with_active(true)
+            .with_visible(true),
         ..Default::default()
     };
 
     eframe::run_native(
         "Agentic Terminal Desktop",
         native_options,
-        Box::new(|cc| Ok(Box::new(AgenticGuiApp::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(AgenticGuiApp::new(cc, rt)))),
     )
 }
