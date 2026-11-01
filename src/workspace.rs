@@ -36,7 +36,7 @@ impl WorkspaceManager {
             max_logs: 1000,
             is_running: false,
         };
-        mgr.add_log(false, false, false, "Terminal Workspace initialized.".to_string());
+        mgr.add_log(false, false, false, "Terminal Workspace ready.".to_string());
         mgr.add_log(
             false,
             false,
@@ -91,7 +91,7 @@ impl WorkspaceManager {
         let files = self.list_files();
         let file_names: Vec<String> = files
             .into_iter()
-            .take(25)
+            .take(30)
             .map(|f| if f.is_dir { format!("{}/", f.name) } else { f.name })
             .collect();
 
