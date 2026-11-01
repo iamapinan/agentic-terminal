@@ -1,67 +1,46 @@
-# AGENTIC TERMINAL TUI (v0.2.0)
+# AGENTIC TERMINAL & GUI (v0.2.0)
 
-A high-performance, dark-themed terminal application written in Rust with an AI agent copilot. Designed for minimal memory footprint (< 16MB RAM) and zero bloat, powered by `ratatui`, `crossterm`, and `tokio`.
-
----
-
-## What's New in v0.2.0
-
-- **OpenRouter Provider**: Full support for OpenRouter API with popular models (`anthropic/claude-3.7-sonnet`, `meta-llama/llama-3.3-70b-instruct`, `deepseek/deepseek-chat`, etc.).
-- **Clean Interface Without Emoji**: Modern technical UI aesthetic using brackets, clean typography, and subtle indicators.
-- **Resizable Panels**: Resize chat vs workspace panel by dragging the divider with mouse, or using `[` and `]` (or `Ctrl+Left` / `Ctrl+Right`).
-- **Clickable Interface**: Native mouse support! Click on panels to focus, click on buttons (`[Change Model]`, `[Toggle Permission]`, `[Setup]`, `[Approve]`, `[Reject]`), and mouse wheel scrolling.
-- **Install as an App**: Packaged as a native macOS Application (`Agentic Terminal.app`) and CLI command (`agentic-terminal`).
+A high-performance, dark-themed AI Agent Copilot workstation in pure Rust with both a **Native Graphical Desktop Window (GUI)** and a **Terminal UI (TUI)**. Ultra-fast, minimal memory footprint (< 20MB RAM), powered by `eframe`/`egui`, `ratatui`, and `tokio`.
 
 ---
 
-## Features
+## Highlights
 
-- **Ultra Low Memory Footprint**: Single static binary (~5MB release), asynchronous non-blocking event loop, RAM usage < 16MB.
-- **Terminal Workspace (Left Panel)**:
-  - Real-time directory file list chips.
-  - Interactive shell logs (stdout / stderr / return codes).
-  - Built-in shell runner supporting `cd` directory tracking and asynchronous command execution.
-- **AI Agent Copilot (Right Panel)**:
-  - Multi-turn conversation memory with markdown code blocks.
-  - Agent can control and inspect the terminal workspace by suggesting or executing commands.
-- **Agent Workspace Permissions (Chat Bottom Panel)**:
-  - `[CONFIRM]`: Agent proposes a command; press `[Enter]` or click `[APPROVE]` to run.
-  - `[AUTO-EXEC]`: Agent automatically runs shell commands in the workspace and feeds execution output back into the conversation.
-  - `[READ-ONLY]`: Agent is barred from executing any workspace command.
-- **5 Major LLM Providers Supported**:
-  1. **Google Gemini API** (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash`, `gemini-1.5-flash`)
-  2. **ChatGPT / OpenAI Compatible API** (OpenAI, Groq, Ollama, DeepSeek with custom Base URL)
-  3. **Anthropic Claude API** (`claude-3-7-sonnet-latest`, `claude-3-5-sonnet-latest`, `claude-3-5-haiku-latest`)
-  4. **Cloudflare Workers AI API** (`@cf/meta/llama-3.3-70b-instruct`, `@cf/meta/llama-3.1-8b-instruct`, etc.)
-  5. **OpenRouter API** (`anthropic/claude-3.7-sonnet`, `meta-llama/llama-3.3-70b-instruct`, `deepseek/deepseek-chat`, etc.)
+- **Native Graphical User Interface (GUI)**:
+  - High-DPI native macOS desktop window with cyber-dark aesthetics.
+  - Split workspace (interactive shell runner, file chips) and Agent copilot chat.
+  - Interactive approval banners for agent workspace control.
+- **Automatic Model Loading**:
+  - Automatically fetches live model catalogs from selected provider APIs in real-time (OpenRouter `/models`, OpenAI `/models`, Google Gemini `/v1beta/models`, Anthropic Claude, Cloudflare Workers AI).
+- **Live Search & Filter**:
+  - Instant live filter bar: type keywords (e.g. `claude`, `deepseek`, `flash`, `llama`) to immediately search and select models from hundreds of available choices.
+- **Clean Interface Without Emoji**:
+  - Clean technical typography and badge labels (`[APP]`, `[DIR]`, `[AGENT]`, `[CONFIRM]`, `[AUTO-EXEC]`, `[READ-ONLY]`).
+- **Full macOS App Installation**:
+  - `Agentic GUI.app` (Spotlight / Dock desktop app)
+  - `Agentic Terminal.app` (Terminal TUI launcher)
+  - `agentic-gui` & `agentic-terminal` CLI commands
 
 ---
 
-## Controls & Shortcuts
+## 5 Supported AI Providers
 
-| Action | Mouse | Keyboard |
-|---|---|---|
-| Switch Panel Focus | Click on panel | `Tab` |
-| Resize Panels | Drag the vertical divider column `│` | `[` (narrower) / `]` (wider) or `Ctrl+Left` / `Ctrl+Right` |
-| Scroll Logs / Chat | Mouse scroll wheel | `PageUp` / `PageDown` |
-| Provider Settings | Click `[^P Setup]` in header | `Ctrl+P` |
-| Switch Model | Click `[Change]` in bottom bar | `Ctrl+M` or `F2` |
-| Toggle Permission | Click `[Toggle]` in bottom bar | `Ctrl+X` or `F3` |
-| Approve / Reject | Click `[APPROVE]` / `[REJECT]` | `Enter` / `Esc` |
-| Clear Logs | — | `Ctrl+L` |
-| Quit App | Click `[^Q Exit]` | `Ctrl+C` or `Ctrl+Q` |
+1. **OpenRouter API** (`https://openrouter.ai/api/v1`) — Live discovery of 100+ models
+2. **Google Gemini API** (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash`...)
+3. **ChatGPT / OpenAI Compatible API** (OpenAI, Groq, Ollama, DeepSeek with custom Base URL)
+4. **Anthropic Claude API** (`claude-3-7-sonnet`, `claude-3-5-sonnet`, `claude-3-5-haiku`...)
+5. **Cloudflare Workers AI API** (`@cf/meta/llama-3.3-70b-instruct`, Qwen, Mistral...)
 
 ---
 
-## Installation as a macOS App
-
-Run the installer script:
+## Installation & Running
 
 ```bash
-cd /Users/apinan/.gemini/antigravity/scratch/rust-agent-tui
+# Build and install to ~/Applications and ~/.local/bin
 ./install.sh
 ```
 
-This installs:
-1. **macOS App**: `~/Applications/Agentic Terminal.app` (launch from Spotlight, Dock, or Finder).
-2. **Terminal CLI**: `~/.local/bin/agentic-terminal` (run `agentic-terminal` anywhere in terminal).
+### Launch Options
+- **Spotlight / Launchpad**: Search and open **Agentic GUI** or **Agentic Terminal**.
+- **CLI GUI**: Run `agentic-gui`
+- **CLI TUI**: Run `agentic-terminal`

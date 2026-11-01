@@ -355,17 +355,25 @@ pub fn render_quick_model_modal(
     f: &mut Frame,
     provider: ProviderType,
     current_model: &str,
+    models: &[String],
+    search_query: &str,
     selected_idx: usize,
-    custom_input: &str,
+    is_loading: bool,
     theme: &Theme,
 ) {
-    let area = centered_rect(54, 50, f.area());
+    let area = centered_rect(65, 60, f.area());
     f.render_widget(Clear, area);
 
-    let models = provider.default_models();
+    // Filter models based on search query
+    let query_lower = search_query.to_lowercase();
+    let filtered_models: Vec<&String> = models
+        .iter()
+        .filter(|m| query_lower.is_empty() || m.to_lowercase().contains(&query_lower))
+        .collect();
+
     let mut items = Vec::new();
 
-    for (i, &m) in models.iter().enumerate() {
+    for (i, &m) in filtered_models.iter().enumerate() {
         let is_selected = i == selected_idx;
         let is_active = m == current_model;
         let prefix = if is_selected { " > " } else { "   " };
@@ -385,29 +393,21 @@ pub fn render_quick_model_modal(
         )));
     }
 
-    let custom_idx = models.len();
-    let custom_selected = selected_idx == custom_idx;
-    let custom_style = if custom_selected {
-        Style::default().fg(theme.accent_cyan).add_modifier(Modifier::BOLD)
+    if items.is_empty() {
+        items.push(ListItem::new(Span::styled(
+            "   (No models match search query. Press Enter to use current query as custom model)",
+            Style::default().fg(theme.text_dim),
+        )));
+    }
+
+    let status_info = if is_loading {
+        " [Loading live models...] "
     } else {
-        Style::default().fg(theme.text_dim)
+        ""
     };
 
-    items.push(ListItem::new(Span::styled(
-        format!(
-            " {} Custom: {}",
-            if custom_selected { ">" } else { " " },
-            if custom_input.is_empty() {
-                "Type custom model..."
-            } else {
-                custom_input
-            }
-        ),
-        custom_style,
-    )));
-
     let block = Block::default()
-        .title(format!(" SWITCH MODEL ({}) ", provider.display_name()))
+        .title(format!(" AI MODELS EXPLORER: {} ({} Models){} ", provider.display_name(), models.len(), status_info))
         .title_style(theme.title_style())
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -416,23 +416,45 @@ pub fn render_quick_model_modal(
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(4), Constraint::Length(2)])
+        .constraints([
+            Constraint::Length(3), // Search Input Box
+            Constraint::Min(4),    // Models list
+            Constraint::Length(2), // Footer shortcuts
+        ])
         .split(Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 2));
 
+    // Search bar widget
+    let search_block = Block::default()
+        .title(" Type to Search & Filter Models ")
+        .title_style(Style::default().fg(theme.accent_cyan))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent_cyan));
+
+    let search_p = Paragraph::new(Line::from(vec![
+        Span::styled(" [SEARCH] ", Style::default().fg(theme.accent_cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(search_query, Style::default().fg(theme.text_primary)),
+        Span::styled("█", Style::default().fg(theme.accent_cyan)),
+    ]))
+    .block(search_block);
+
     f.render_widget(block, area);
-    f.render_widget(List::new(items), layout[0]);
+    f.render_widget(search_p, layout[0]);
+    f.render_widget(List::new(items), layout[1]);
 
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled("[Click/Up/Down]", Style::default().fg(theme.accent_cyan)),
+        Span::styled("[Type]", Style::default().fg(theme.accent_cyan)),
+        Span::raw(" Search | "),
+        Span::styled("[Up/Down]", Style::default().fg(theme.accent_cyan)),
         Span::raw(" Select | "),
         Span::styled("[Enter]", Style::default().fg(theme.accent_emerald)),
-        Span::raw(" Switch | "),
+        Span::raw(" Apply | "),
         Span::styled("[Esc]", Style::default().fg(theme.accent_rose)),
         Span::raw(" Close"),
     ]))
     .alignment(Alignment::Center);
 
-    f.render_widget(footer, layout[1]);
+    f.render_widget(footer, layout[2]);
 }
 
 pub fn render_command_confirm_modal(f: &mut Frame, cmd: &str, theme: &Theme) {

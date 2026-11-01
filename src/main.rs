@@ -1,5 +1,6 @@
 mod agent;
 mod config;
+mod model_fetcher;
 mod providers;
 mod ui;
 mod workspace;
@@ -16,6 +17,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use model_fetcher::ModelFetcher;
 use providers::{ChatMessage, LlmService};
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::io;
@@ -34,13 +36,19 @@ use workspace::WorkspaceManager;
 enum AppEvent {
     AgentSuccess { reply: String, command: Option<String> },
     AgentFailed { error: String },
+    ModelsFetched { models: Vec<String> },
     CommandExecuted { code: i32, output: String, is_agent: bool },
 }
 
 enum ModalState {
     None,
     ProviderSettings(ProviderSettingsState),
-    ModelSelector { selected_idx: usize, custom_input: String },
+    ModelSelector {
+        selected_idx: usize,
+        search_query: String,
+        models: Vec<String>,
+        is_loading: bool,
+    },
     CommandConfirm(String),
 }
 
@@ -68,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
     let theme = Theme::default();
     let mut workspace = WorkspaceManager::new();
     let llm_service = Arc::new(LlmService::new());
+    let model_fetcher = Arc::new(ModelFetcher::new());
 
     let mut focused_panel = FocusedPanel::Chat;
     let mut modal_state = ModalState::None;
@@ -125,13 +134,20 @@ async fn main() -> anyhow::Result<()> {
                 ModalState::ProviderSettings(state) => {
                     last_modal_hit_map = render_provider_settings_modal(f, state, &theme);
                 }
-                ModalState::ModelSelector { selected_idx, custom_input } => {
+                ModalState::ModelSelector {
+                    selected_idx,
+                    search_query,
+                    models,
+                    is_loading,
+                } => {
                     render_quick_model_modal(
                         f,
                         config.active_provider,
                         &config.active_model,
+                        models,
+                        search_query,
                         *selected_idx,
-                        custom_input,
+                        *is_loading,
                         &theme,
                     );
                 }
@@ -185,6 +201,12 @@ async fn main() -> anyhow::Result<()> {
                         is_thinking = false;
                         chat_messages.push(AgentEngine::create_system_message(format!("[ERROR] {error}")));
                     }
+                    AppEvent::ModelsFetched { models } => {
+                        if let ModalState::ModelSelector { models: ref mut cur_models, ref mut is_loading, .. } = modal_state {
+                            *is_loading = false;
+                            *cur_models = models;
+                        }
+                    }
                     AppEvent::CommandExecuted { code, output, is_agent } => {
                         if is_agent {
                             let snippet = if output.len() > 500 {
@@ -222,6 +244,7 @@ async fn main() -> anyhow::Result<()> {
                                     &mut workspace_scroll,
                                     &mut chat_scroll,
                                     llm_service.clone(),
+                                    model_fetcher.clone(),
                                     event_tx.clone(),
                                 ).await;
                             }
@@ -239,6 +262,8 @@ async fn main() -> anyhow::Result<()> {
                                 &last_hit_map,
                                 &last_modal_hit_map,
                                 terminal.size()?.width,
+                                model_fetcher.clone(),
+                                event_tx.clone(),
                             ).await;
                         }
                         _ => {}
@@ -254,6 +279,35 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn open_model_selector(
+    modal_state: &mut ModalState,
+    config: &AppConfig,
+    fetcher: Arc<ModelFetcher>,
+    tx: mpsc::Sender<AppEvent>,
+) {
+    let initial_models: Vec<String> = config
+        .active_provider
+        .default_models()
+        .iter()
+        .map(|&s| s.to_string())
+        .collect();
+
+    *modal_state = ModalState::ModelSelector {
+        selected_idx: 0,
+        search_query: String::new(),
+        models: initial_models,
+        is_loading: true,
+    };
+
+    let cfg_clone = config.clone();
+    let provider = config.active_provider;
+    tokio::spawn(async move {
+        if let Ok(loaded) = fetcher.fetch_models(&cfg_clone, provider).await {
+            let _ = tx.send(AppEvent::ModelsFetched { models: loaded }).await;
+        }
+    });
+}
+
 async fn handle_mouse_event(
     mouse: crossterm::event::MouseEvent,
     modal_state: &mut ModalState,
@@ -266,6 +320,8 @@ async fn handle_mouse_event(
     hit_map: &UiHitMap,
     modal_hit_map: &ModalHitMap,
     total_term_width: u16,
+    fetcher: Arc<ModelFetcher>,
+    event_tx: mpsc::Sender<AppEvent>,
 ) {
     let col = mouse.column;
     let row = mouse.row;
@@ -360,14 +416,15 @@ async fn handle_mouse_event(
                     }
                     return;
                 }
-                ModalState::ModelSelector { selected_idx, custom_input: _ } => {
-                    // Modal handles click to select
-                    let models = config.active_provider.default_models();
-                    *selected_idx = (*selected_idx + 1) % (models.len() + 1);
+                ModalState::ModelSelector { selected_idx, models, search_query, .. } => {
+                    let query_lower = search_query.to_lowercase();
+                    let filtered_count = models.iter().filter(|m| query_lower.is_empty() || m.to_lowercase().contains(&query_lower)).count();
+                    if filtered_count > 0 {
+                        *selected_idx = (*selected_idx + 1) % filtered_count;
+                    }
                     return;
                 }
                 ModalState::CommandConfirm(cmd) => {
-                    // Enter or Esc
                     let cmd_to_run = cmd.clone();
                     *modal_state = ModalState::None;
                     *pending_command = None;
@@ -384,10 +441,7 @@ async fn handle_mouse_event(
             }
 
             if rect_contains(hit_map.bottom_model_btn, col, row) {
-                *modal_state = ModalState::ModelSelector {
-                    selected_idx: 0,
-                    custom_input: String::new(),
-                };
+                open_model_selector(modal_state, config, fetcher, event_tx);
                 return;
             }
 
@@ -424,7 +478,6 @@ async fn handle_mouse_event(
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            // Dragging divider to resize panels!
             if total_term_width > 0 {
                 let left_pct = ((col as f32 / total_term_width as f32) * 100.0) as u16;
                 let chat_pct = 100_u16.saturating_sub(left_pct);
@@ -465,6 +518,7 @@ async fn handle_key_event(
     workspace_scroll: &mut usize,
     chat_scroll: &mut usize,
     llm_service: Arc<LlmService>,
+    fetcher: Arc<ModelFetcher>,
     event_tx: mpsc::Sender<AppEvent>,
 ) {
     // 1. Check active modal first
@@ -596,31 +650,39 @@ async fn handle_key_event(
             }
             return;
         }
-        ModalState::ModelSelector { selected_idx, custom_input } => {
-            let models = config.active_provider.default_models();
-            let total_options = models.len() + 1; // plus custom
+        ModalState::ModelSelector { selected_idx, search_query, models, .. } => {
+            let query_lower = search_query.to_lowercase();
+            let filtered: Vec<&String> = models.iter().filter(|m| query_lower.is_empty() || m.to_lowercase().contains(&query_lower)).collect();
+            let total_filtered = filtered.len();
 
             match key.code {
                 KeyCode::Esc => {
                     *modal_state = ModalState::None;
                 }
                 KeyCode::Up => {
-                    *selected_idx = (*selected_idx + total_options - 1) % total_options;
+                    if total_filtered > 0 {
+                        *selected_idx = (*selected_idx + total_filtered - 1) % total_filtered;
+                    }
                 }
                 KeyCode::Down => {
-                    *selected_idx = (*selected_idx + 1) % total_options;
+                    if total_filtered > 0 {
+                        *selected_idx = (*selected_idx + 1) % total_filtered;
+                    }
                 }
-                KeyCode::Char(c) if *selected_idx == models.len() => {
-                    custom_input.push(c);
+                KeyCode::Char(c) => {
+                    search_query.push(c);
+                    *selected_idx = 0;
                 }
-                KeyCode::Backspace if *selected_idx == models.len() => {
-                    custom_input.pop();
+                KeyCode::Backspace => {
+                    search_query.pop();
+                    *selected_idx = 0;
                 }
                 KeyCode::Enter => {
-                    let new_model = if *selected_idx < models.len() {
-                        models[*selected_idx].to_string()
-                    } else if !custom_input.trim().is_empty() {
-                        custom_input.trim().to_string()
+                    let new_model = if total_filtered > 0 {
+                        let idx = (*selected_idx).min(total_filtered - 1);
+                        filtered[idx].clone()
+                    } else if !search_query.trim().is_empty() {
+                        search_query.trim().to_string()
                     } else {
                         config.active_model.clone()
                     };
@@ -678,10 +740,7 @@ async fn handle_key_event(
                 return;
             }
             KeyCode::Char('m') => {
-                *modal_state = ModalState::ModelSelector {
-                    selected_idx: 0,
-                    custom_input: String::new(),
-                };
+                open_model_selector(modal_state, config, fetcher, event_tx);
                 return;
             }
             KeyCode::Char('o') => {
@@ -720,22 +779,17 @@ async fn handle_key_event(
     // Function keys and bracket shortcuts for resizing
     match key.code {
         KeyCode::Char('[') => {
-            // Expand workspace / shrink chat
             config.chat_panel_percent = config.chat_panel_percent.saturating_sub(5).max(20);
             let _ = config.save();
             return;
         }
         KeyCode::Char(']') => {
-            // Shrink workspace / expand chat
             config.chat_panel_percent = (config.chat_panel_percent + 5).min(80);
             let _ = config.save();
             return;
         }
         KeyCode::F(2) => {
-            *modal_state = ModalState::ModelSelector {
-                selected_idx: 0,
-                custom_input: String::new(),
-            };
+            open_model_selector(modal_state, config, fetcher, event_tx);
             return;
         }
         KeyCode::F(3) => {
